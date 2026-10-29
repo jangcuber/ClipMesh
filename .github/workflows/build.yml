@@ -28,7 +28,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: bash scripts/build-macos.sh
       - run: bash platforms/ios/test-protocol.sh
-      - run: brew install ldid dpkg
+      - run: brew install ldid dpkg ripgrep
       - run: rustup target add aarch64-apple-ios
       - run: bash platforms/ios/build-native.sh
       - run: bash platforms/ios/build.sh
