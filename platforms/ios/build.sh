@@ -12,7 +12,7 @@ if [[ ! -f "$TRANSPORT" ]]; then
   echo "Missing iOS transport binary: $TRANSPORT. Build the Rust aarch64-apple-ios release target first." >&2
   exit 1
 fi
-xcrun lipo -verify_arch arm64 "$TRANSPORT"
+xcrun lipo "$TRANSPORT" -verify_arch arm64
 if ! xcrun vtool -show-build "$TRANSPORT" | rg -q 'platform IOS$'; then
   echo "Transport must be an iPhoneOS executable, not a macOS or simulator binary." >&2
   exit 1
