@@ -1,0 +1,3 @@
+## License
+
+[Unlicence](https://unlicense.org/)

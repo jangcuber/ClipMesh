@@ -1,0 +1,24 @@
+{
+  "group": {
+    "name": "Test Group",
+    "relay": "ws://127.0.0.1:4243",
+    "key": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+  },
+  "groupId": "630dcd2966c4336691125448bbb25b4ff412a49c732db2c8abc1b8581bd710dd",
+  "uri": "clipmesh://join#eyJ2IjoxLCJuYW1lIjoiVGVzdCBHcm91cCIsInJlbGF5Ijoid3M6Ly8xMjcuMC4wLjE6NDI0MyIsImtleSI6IkFBRUNBd1FGQmdjSUNRb0xEQTBPRHhBUkVoTVVGUllYR0JrYUd4d2RIaDg9In0",
+  "event": {
+    "v": 1,
+    "id": "00000000-0000-4000-8000-000000000001",
+    "device": "00000000-0000-4000-8000-000000000002",
+    "clock": 42,
+    "created_ms": 1793020000000,
+    "mime": "text/plain",
+    "text": "Hello, 안녕하세요 👋\nclipboard"
+  },
+  "envelope": {
+    "v": 1,
+    "group": "630dcd2966c4336691125448bbb25b4ff412a49c732db2c8abc1b8581bd710dd",
+    "nonce": "AAECAwQFBgcICQoL",
+    "ciphertext": "PCCgOf/U7jnkJbWxk9lIXbPmtwTAVm9MCFfIsS1ZMJ85IJ7MgvEiqESUT924txgI33tMrz6z1bNc8ggjOtPF3sAM9krj/BZRLGSHWt+/PsUAuvlSW1NjWM3NrvxIwIm9+dp1xMctp3n1PgSGelkDHMgCA9+GoXr3Pt1t/LXfXT6JYjD2hOf7YyTDJchQv274FICGTUE+4ybtNoZV1vCdi+vjvC/Lt6kSywzx2jMVDlAYWye3E0f3BIlFVOeBWiZ4TyLplmSttKZWJLfEx7gia3BRgckxL0HmZhla45o="
+  }
+}

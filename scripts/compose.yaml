@@ -1,0 +1,11 @@
+services:
+  relay:
+    build:
+      context: ..
+      dockerfile: scripts/Dockerfile.relay
+    ports:
+      - "127.0.0.1:47391:47391"
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>dev.clipmesh.ios</string>
+<key>CFBundleExecutable</key><string>ClipMesh</string>
+<key>CFBundleName</key><string>ClipMesh</string>
+<key>CFBundleDisplayName</key><string>ClipMesh</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleShortVersionString</key><string>0.3.0</string>
+<key>CFBundleVersion</key><string>8</string>
+<key>MinimumOSVersion</key><string>15.0</string>
+<key>LSRequiresIPhoneOS</key><true/>
+<key>UIDeviceFamily</key><array><integer>1</integer><integer>2</integer></array>
+<key>UISupportedInterfaceOrientations</key><array><string>UIInterfaceOrientationPortrait</string></array>
+<key>UILaunchScreen</key><dict/>
+<key>NSCameraUsageDescription</key><string>Scan a private ClipMesh pairing QR shown on another device.</string>
+<key>NSLocalNetworkUsageDescription</key><string>Connect to your private ClipMesh relay and Sync Group.</string>
+<key>NSAppTransportSecurity</key><dict><key>NSAllowsArbitraryLoads</key><true/></dict>
+</dict></plist>

@@ -1,0 +1,9 @@
+Package: dev.clipmesh.ios
+Name: ClipMesh
+Version: 0.3.0
+Architecture: iphoneos-arm64
+Description: Accountless encrypted clipboard sync with a SpringBoard engine and setup app.
+Maintainer: ClipMesh contributors
+Author: ClipMesh contributors
+Section: Tweaks
+Depends: firmware (>= 15.0), mobilesubstrate

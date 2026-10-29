@@ -1,0 +1,8 @@
+#!/bin/sh
+if [ "$1" = remove ] || [ "$1" = purge ]; then
+  /var/jb/usr/bin/uicache -a 2>/dev/null || true
+fi
+if [ "$1" = purge ]; then
+  rm -f /var/mobile/Library/Preferences/dev.clipmesh.ios.json /var/mobile/Library/Preferences/dev.clipmesh.ios.status.json /var/mobile/Library/Preferences/dev.clipmesh.ios.state.json
+fi
+exit 0

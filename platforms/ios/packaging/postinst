@@ -1,0 +1,6 @@
+#!/bin/sh
+set -e
+if [ "$1" = configure ]; then
+  /var/jb/usr/bin/uicache -p /var/jb/Applications/ClipMesh.app 2>/dev/null || true
+fi
+exit 0

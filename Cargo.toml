@@ -1,0 +1,18 @@
+[workspace]
+members = ["crates/clipmesh"]
+resolver = "2"
+
+[workspace.package]
+version = "0.3.0"
+edition = "2021"
+license = "MIT"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+
+[patch.crates-io]
+# netdev0.46.3 references a macOS-only libc ioctl struct on iOS.
+netdev = { path = "vendor/netdev" }
+netwatch = { path = "vendor/netwatch" }

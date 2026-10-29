@@ -1,0 +1,12 @@
+FROM rust:1-bookworm AS build
+WORKDIR /src
+COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
+COPY vendor ./vendor
+RUN cargo build --release --locked -p clipmesh
+FROM debian:bookworm-slim
+RUN useradd --system --uid 10001 clipmesh
+COPY --from=build /src/target/release/clipmesh /usr/local/bin/clipmesh
+USER 10001
+EXPOSE 47391
+ENTRYPOINT ["clipmesh", "relay", "--listen", "0.0.0.0:47391"]

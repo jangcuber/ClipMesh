@@ -1,0 +1,3 @@
+OkHttp 4.12.0 LICENSE: https://raw.githubusercontent.com/square/okhttp/parent-4.12.0/LICENSE.txt
+ZXing core 3.5.3 LICENSE: https://raw.githubusercontent.com/zxing/zxing/zxing-3.5.3/LICENSE
+ZXing Android Embedded 4.3.0 COPYING: https://raw.githubusercontent.com/journeyapps/zxing-android-embedded/v4.3.0/COPYING
