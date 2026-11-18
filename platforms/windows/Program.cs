@@ -71,6 +71,8 @@ class MeshForm : Form {
     string? pendingRemote; string pendingMime = "text/plain"; uint lastRemoteSequence;
     [DllImport("user32.dll")] static extern uint GetClipboardSequenceNumber();
     readonly Label status = new() { Text = "Create or join a group to start.", AutoSize = true, MaximumSize = new Size(550, 60) };
+    readonly Label transferStatus = new() { Text = "아직 받은 클립보드가 없습니다.", AutoSize = true, MaximumSize = new Size(550, 100) };
+    readonly object diagnosticLock = new();
     readonly ComboBox groups = new() { Width = 550, DropDownStyle = ComboBoxStyle.DropDownList };
     readonly TextBox groupName = new() { Width = 550, Text = "My devices" };
     readonly TextBox relayAddress = new() { Width = 550, PlaceholderText = "선택 사항 · 예전 WebSocket 릴레이 주소" };
@@ -98,6 +100,8 @@ class MeshForm : Form {
         paused.Font = new Font(SystemFonts.DefaultFont.FontFamily, 13, FontStyle.Bold); panel.Controls.Add(paused);
         Label("켜면 이 그룹의 텍스트와 이미지를 주고받습니다. 끄면 이 PC의 송수신이 멈춥니다.");
         Label("현재 그룹"); panel.Controls.Add(groups); panel.Controls.Add(peerSummary);
+        panel.Controls.Add(transferStatus);
+        Button("진단 기록 폴더 열기", () => Process.Start(new ProcessStartInfo(directory) { UseShellExecute = true }));
         Button("다른 기기 연결 · QR 표시", ShowQR); Button("QR 이미지로 참가", JoinQR);
         Label("창을 닫아도 작업 표시줄의 숨겨진 아이콘(∧)에서 계속 실행됩니다. 완전히 끝내려면 트레이 메뉴에서 종료하세요.");
         panel.Controls.Add(login);
@@ -129,6 +133,13 @@ class MeshForm : Form {
     }
     public void ShowSettings() { Show(); WindowState = FormWindowState.Normal; Activate(); }
     public void ExitForUpdate() { exiting = true; Close(); }
+    void Trace(string message) {
+        try { lock (diagnosticLock) {
+            string path = Path.Combine(directory, "diagnostic.log");
+            if (File.Exists(path) && new FileInfo(path).Length > 1024 * 1024) File.Move(path, path + ".old", true);
+            File.AppendAllText(path, $"{DateTimeOffset.UtcNow:O} {message}{Environment.NewLine}");
+        } } catch { }
+    }
     static void Safe(Action action) { try { action(); } catch (Exception e) { MessageBox.Show(e.Message, "ClipMesh"); } }
     void Save() {
         string temporary = ConfigPath + ".tmp"; File.WriteAllText(temporary, JsonSerializer.Serialize(config)); File.Move(temporary, ConfigPath, true);
@@ -144,12 +155,13 @@ class MeshForm : Form {
     }
     static void Stop(Process? process) { try { if (process is { HasExited: false }) process.Kill(true); process?.Dispose(); } catch { } }
     void StartCore() {
+        Trace("start core; app=" + Application.ProductVersion);
         int token = ++generation; lastConnection = default; RenderConnection(); input = null; Stop(core); core = null; pendingRemote = null; lastRemoteSequence = 0;
         if (config.groups.Count == 0) return; Save();
         var info = new ProcessStartInfo(CorePath) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true, StandardInputEncoding = new UTF8Encoding(false), StandardOutputEncoding = Encoding.UTF8 };
         info.ArgumentList.Add("run"); info.ArgumentList.Add("--config"); info.ArgumentList.Add(ConfigPath);
         var process = new Process { StartInfo = info, EnableRaisingEvents = true };
-        process.OutputDataReceived += (_, e) => { if (e.Data == null || IsDisposed || !IsHandleCreated) return; try { var doc = JsonDocument.Parse(e.Data); BeginInvoke(() => { using (doc) { if (token == generation) Receive(doc.RootElement); } }); } catch { } };
+        process.OutputDataReceived += (_, e) => { if (e.Data == null || IsDisposed || !IsHandleCreated) return; try { var doc = JsonDocument.Parse(e.Data); BeginInvoke(() => { using (doc) { if (token == generation) Receive(doc.RootElement); } }); } catch (Exception error) { Trace($"core output rejected chars={e.Data.Length} error={error.GetType().Name}"); } };
         process.ErrorDataReceived += (_, _) => { }; // Drain stderr without recording clipboard content.
         process.Exited += async (_, _) => { await Task.Delay(3000); if (IsDisposed || !IsHandleCreated) return; BeginInvoke(() => { if (token == generation && !exiting) Safe(StartCore); }); };
         process.Start(); input = process.StandardInput; input.AutoFlush = true; core = process; process.BeginOutputReadLine(); process.BeginErrorReadLine(); status.Text = "Connecting…";
@@ -157,9 +169,9 @@ class MeshForm : Form {
     void Send(object value) { if (input == null) return; try { input.WriteLine(JsonSerializer.Serialize(value)); } catch { status.Text = "Sync engine disconnected"; } }
     void Receive(JsonElement root) {
         if (!root.TryGetProperty("type", out var type)) return;
-        if (type.GetString() == "clipboard" && !config.paused) { var ev = root.GetProperty("event"); pendingRemote = ev.GetProperty("text").GetString(); pendingMime = ev.GetProperty("mime").GetString() ?? "text/plain"; ApplyRemote(); }
+        if (type.GetString() == "clipboard" && !config.paused) { var ev = root.GetProperty("event"); pendingRemote = ev.GetProperty("text").GetString(); pendingMime = ev.GetProperty("mime").GetString() ?? "text/plain"; Trace($"received mime={pendingMime} encodedChars={pendingRemote?.Length ?? 0}"); transferStatus.Text = pendingMime == "image/png" ? "이미지 수신됨 · 클립보드에 반영 중…" : "텍스트 수신됨 · 클립보드에 반영 중…"; ApplyRemote(); }
         else if (type.GetString() == "status") { lastConnection = root.Clone(); RenderConnection(); selectedInvitation.Text = SharingGroup(false)?.Invitation ?? "동기화를 켜면 연결용 QR이 준비됩니다."; }
-        else if (type.GetString() == "error") status.Text = root.GetProperty("message").GetString();
+        else if (type.GetString() == "error") { transferStatus.Text = "동기화 엔진 오류 · " + root.GetProperty("message").GetString(); Trace("core error event"); }
     }
     void RenderConnection() {
         paused.Enabled = config.groups.Count > 0;
@@ -194,19 +206,22 @@ class MeshForm : Form {
         try {
             if (pendingMime == "image/png") {
                 var bytes = Convert.FromBase64String(pendingRemote);
-                if (!ValidPNG(bytes)) { pendingRemote = null; status.Text = "Rejected invalid or oversized image"; return; }
+                if (!ValidPNG(bytes)) { Trace($"image rejected bytes={bytes.Length}"); pendingRemote = null; transferStatus.Text = "지원하지 않는 이미지 또는 전송 한도 초과"; return; }
                 using var stream = new MemoryStream(bytes);
                 using var image = Image.FromStream(stream, true, true);
                 using var bitmap = new Bitmap(image);
-                var value = new DataObject();
-                value.SetData("PNG", false, new MemoryStream(bytes)); value.SetData(DataFormats.Bitmap, true, bitmap);
-                Clipboard.SetDataObject(value, true);
+                // Publish the native Windows image format. An extra managed PNG
+                // stream can be preferred over the bitmap by paste targets.
+                Clipboard.SetImage(bitmap);
+                Trace($"image applied bytes={bytes.Length} width={bitmap.Width} height={bitmap.Height}");
+                transferStatus.Text = $"이미지 반영 완료 · {bitmap.Width}×{bitmap.Height} · {bytes.Length / 1048576.0:F2} MiB";
             } else if (pendingMime == "text/plain") {
                 if (pendingRemote.Length == 0) Clipboard.Clear(); else Clipboard.SetText(pendingRemote, TextDataFormat.UnicodeText);
+                Trace("text applied"); transferStatus.Text = "텍스트 반영 완료";
             }
             lastRemoteSequence = GetClipboardSequenceNumber(); pendingRemote = null;
-        } catch (ExternalException) { }
-        catch (Exception) { pendingRemote = null; status.Text = "Image could not be decoded"; }
+        } catch (ExternalException) { transferStatus.Text = "다른 앱이 클립보드를 사용 중 · 다시 시도합니다"; }
+        catch (Exception error) { Trace($"clipboard apply failed error={error.GetType().Name} hresult={error.HResult}"); pendingRemote = null; transferStatus.Text = "클립보드 반영 실패 · " + error.GetType().Name; }
     }
     protected override void OnHandleCreated(EventArgs e) { base.OnHandleCreated(e); AddClipboardFormatListener(Handle); }
     protected override void OnHandleDestroyed(EventArgs e) { RemoveClipboardFormatListener(Handle); base.OnHandleDestroyed(e); }

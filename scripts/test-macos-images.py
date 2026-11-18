@@ -9,14 +9,16 @@ def png(color):
     return b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('!IIBBBBB',3,2,8,2,0,0,0))+chunk(b'IDAT',zlib.compress((b'\0'+bytes(color)*3)*2))+chunk(b'IEND',b'')
 
 async def main():
-    core=str(ROOT/'target/release/clipmesh'); app=str(ROOT/'dist/ClipMesh.app/Contents/MacOS/ClipMesh')
+    core=os.environ.get('CLIPMESH_TEST_CORE',str(ROOT/'target/release/clipmesh')); app=os.environ.get('CLIPMESH_TEST_APP',str(ROOT/'dist/ClipMesh.app/Contents/MacOS/ClipMesh'))
     probe=str(ROOT/'.cache/macos-pasteboard-probe')
-    proc=await asyncio.create_subprocess_exec('xcrun','swiftc',str(ROOT/'scripts/macos-pasteboard-probe.swift'),'-o',probe)
+    proc=await asyncio.create_subprocess_exec('xcrun','swiftc','-module-cache-path',str(ROOT/'.cache/swift'),str(ROOT/'scripts/macos-pasteboard-probe.swift'),'-o',probe)
     if await proc.wait(): raise RuntimeError('Swift probe compilation failed')
     with tempfile.TemporaryDirectory(prefix='clipmesh-mac-image-') as tmp:
         tmp=Path(tmp); board='dev.clipmesh.validation.'+str(uuid.uuid4()); stop=tmp/'stop'
         with socket.socket() as sock: sock.bind(('127.0.0.1',0)); port=sock.getsockname()[1]
         key=os.urandom(32); group={'name':'Native image validation','relay':f'ws://127.0.0.1:{port}','key':base64.b64encode(key).decode()}; gid=hashlib.sha256(key).hexdigest()
+        p2p=os.environ.get('CLIPMESH_TEST_P2P')=='1'
+        if p2p: group['transport']='p2p'
         paths=[]
         for i in range(2):
             path=tmp/f'{i}.json'; path.write_text(json.dumps({'v':1,'device':str(uuid.uuid4()),'name':'Image test','groups':[group],'active_group':gid,'paused':False})); path.chmod(0o600); paths.append(path)
@@ -34,8 +36,9 @@ async def main():
                         if not line: raise RuntimeError('peer exited')
                         event=json.loads(line)
                         if predicate(event): return event
-                return await asyncio.wait_for(read(),20)
+                return await asyncio.wait_for(read(),60)
             await receive(lambda v:v.get('connected') is True)
+            if p2p: await receive(lambda v:v.get('type')=='status' and v.get('peers',0)>0 and v.get('transport')=='p2p-direct')
             for _ in range(100):
                 if b'TEST receive status connected' in (tmp/'app.log').read_bytes(): break
                 if app_process.returncode is not None: raise RuntimeError('Mac app exited')
@@ -45,6 +48,35 @@ async def main():
             p=await asyncio.create_subprocess_exec(probe,'write',board,str(source)); assert await p.wait()==0
             ev=(await receive(lambda v:v.get('type')=='clipboard'))['event']
             assert ev['mime']=='image/png' and base64.b64decode(ev['text'])==source.read_bytes()
+            for kind in ('jpeg', 'tiff', 'mixed', 'empty'):
+                print('Checking Mac clipboard format: '+kind, flush=True)
+                source.write_bytes(png({'jpeg':(20,80,200),'tiff':(150,70,40),'mixed':(30,180,90),'empty':(200,180,90)}[kind]))
+                p=await asyncio.create_subprocess_exec(probe,kind,board,str(source)); assert await p.wait()==0
+                ev=(await receive(lambda v:v.get('type')=='clipboard'))['event']
+                decoded=base64.b64decode(ev['text'])
+                assert ev['mime']=='image/png' and decoded.startswith(b'\x89PNG\r\n\x1a\n'), kind+' was not sent as an image'
+                assert struct.unpack('!II',decoded[16:24])==(3,2), kind+' dimensions changed'
+            source.write_bytes(png((60,20,170)))
+            provider=await asyncio.create_subprocess_exec(probe,'delayed',board,str(source),stdout=asyncio.subprocess.PIPE)
+            assert await provider.stdout.readline()==b'ready\n'
+            ev=(await receive(lambda v:v.get('type')=='clipboard'))['event']
+            assert ev['mime']=='image/png' and base64.b64decode(ev['text'])==source.read_bytes(), 'delayed image was lost'
+            assert await provider.wait()==0
+            large_source=tmp/'large.png'
+            supplied=os.environ.get('CLIPMESH_TEST_IMAGE')
+            if supplied:
+                large_source.write_bytes(Path(supplied).read_bytes())
+            else:
+                def chunk(t,b): return struct.pack('!I',len(b))+t+b+struct.pack('!I',binascii.crc32(t+b)&0xffffffff)
+                rows=b''.join(b'\0'+os.urandom(2300*3) for _ in range(1600))
+                large_source.write_bytes(b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('!IIBBBBB',2300,1600,8,2,0,0,0))+chunk(b'IDAT',zlib.compress(rows))+chunk(b'IEND',b''))
+            for kind in ('write', 'tiff'):
+                p=await asyncio.create_subprocess_exec(probe,kind,board,str(large_source)); assert await p.wait()==0
+                ev=(await receive(lambda v:v.get('type')=='clipboard'))['event']
+                normalized=base64.b64decode(ev['text'])
+                assert ev['mime']=='image/png' and len(normalized)<=8*1024*1024
+                dimensions=struct.unpack('!II',normalized[16:24])
+                print(json.dumps({'large_image_format':kind,'source_bytes':large_source.stat().st_size,'wire_bytes':len(normalized),'dimensions':dimensions}),flush=True)
             data=png((10,240,60)); peer.stdin.write((json.dumps({'op':'copy_image','data':base64.b64encode(data).decode()})+'\n').encode()); await peer.stdin.drain()
             result=tmp/'result.png'
             for _ in range(60):
@@ -52,7 +84,7 @@ async def main():
                 if await p.wait()==0 and result.read_bytes()==data: break
                 await asyncio.sleep(.2)
             else: raise RuntimeError('Mac did not apply remote PNG')
-            print(json.dumps({'mac_app_to_peer_png':True,'peer_to_native_mac_png':True,'exact_bytes':True,'general_clipboard_modified':False}))
+            print(json.dumps({'mac_app_to_peer_png_jpeg_tiff':True,'delayed_image_retried':True,'invalid_png_falls_back_to_jpeg':True,'peer_to_native_mac_png':True,'png_exact_bytes':True,'general_clipboard_modified':False}))
         except Exception:
             print((tmp/'app.log').read_text(errors='replace')[-3000:])
             raise

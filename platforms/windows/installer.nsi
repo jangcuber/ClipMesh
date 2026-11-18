@@ -1,10 +1,10 @@
 Unicode true
 !include "MUI2.nsh"
 Name "ClipMesh"
-VIProductVersion "0.3.0.0"
+VIProductVersion "0.3.2.0"
 VIAddVersionKey /LANG=1033 "ProductName" "ClipMesh"
-VIAddVersionKey /LANG=1033 "FileVersion" "0.3.0"
-VIAddVersionKey /LANG=1033 "ProductVersion" "0.3.0"
+VIAddVersionKey /LANG=1033 "FileVersion" "0.3.2"
+VIAddVersionKey /LANG=1033 "ProductVersion" "0.3.2"
 VIAddVersionKey /LANG=1033 "FileDescription" "ClipMesh Setup"
 VIAddVersionKey /LANG=1033 "LegalCopyright" "ClipMesh contributors"
 !ifdef CLIPMESH_SETUP_OUTPUT
@@ -49,7 +49,7 @@ Section "ClipMesh"
   CreateShortcut "$SMPROGRAMS\ClipMesh\ClipMesh.lnk" "$INSTDIR\ClipMesh.exe"
   CreateShortcut "$SMPROGRAMS\ClipMesh\Uninstall.lnk" "$INSTDIR\Uninstall.exe"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ClipMesh" "DisplayName" "ClipMesh"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ClipMesh" "DisplayVersion" "0.3.0"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ClipMesh" "DisplayVersion" "0.3.2"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ClipMesh" "UninstallString" '$\"$INSTDIR\Uninstall.exe$\"'
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ClipMesh" "NoModify" 1
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ClipMesh" "NoRepair" 1

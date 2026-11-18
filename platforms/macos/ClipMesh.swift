@@ -3,6 +3,7 @@ import CryptoKit
 import ServiceManagement
 import CoreImage
 import ImageIO
+import UniformTypeIdentifiers
 
 struct Group: Codable {
     var name: String; var relay: String; var key: String; var transport: String? = nil; var seeds: [String]? = nil
@@ -52,6 +53,12 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate {
         return CommandLine.arguments[index + 1]
     }()
     lazy var pasteboard: NSPasteboard = testPasteboardName.map { NSPasteboard(name: NSPasteboard.Name($0)) } ?? .general
+    lazy var diagnosticLog: FileHandle? = {
+        guard let i = CommandLine.arguments.firstIndex(of: "--diagnostic-log"), CommandLine.arguments.indices.contains(i + 1) else { return nil }
+        let path = CommandLine.arguments[i + 1]
+        guard fm.createFile(atPath: path, contents: nil, attributes: [.posixPermissions: 0o600]) else { return nil }
+        return FileHandle(forWritingAtPath: path)
+    }()
     lazy var configURL: URL = {
         if let index = CommandLine.arguments.firstIndex(of: "--config"), CommandLine.arguments.indices.contains(index + 1) { return URL(fileURLWithPath: CommandLine.arguments[index + 1]) }
         if CommandLine.arguments.contains("--smoke-test") || CommandLine.arguments.contains("--image-self-test") { return fm.temporaryDirectory.appendingPathComponent("clipmesh-smoke-" + UUID().uuidString).appendingPathComponent("config.json") }
@@ -61,6 +68,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var child: Process?; var relayChild: Process?; var input: FileHandle?
     var statusItem: NSStatusItem!; var window: NSWindow!; var timer: Timer?
     var generation = UUID(); var lastChange = 0; var pendingRemote: (mime: String, value: String)?
+    var imageRetryRevision = -1; var imageRetryUntil = Date.distantPast
     let groupPicker = NSPopUpButton(); let status = NSTextField(labelWithString: "No group selected")
     let relayField = NSTextField(string: "")
     let nameField = NSTextField(string: "My devices")
@@ -132,6 +140,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate {
         status.font = .boldSystemFont(ofSize: 20); status.lineBreakMode = .byWordWrapping; stack.addArrangedSubview(status)
         pauseToggle.font = .boldSystemFont(ofSize: 18); pauseToggle.target = self; pauseToggle.action = #selector(togglePause); stack.addArrangedSubview(pauseToggle)
         label("켜면 이 그룹의 텍스트와 이미지를 주고받습니다. 끄면 이 Mac의 송수신이 멈춥니다.")
+        label("큰 이미지는 전송 가능한 크기로 해상도를 자동 조정합니다.")
         label("현재 그룹")
         groupPicker.target = self; groupPicker.action = #selector(selectGroup); stack.addArrangedSubview(groupPicker)
         peersLabel.font = .systemFont(ofSize: 14); stack.addArrangedSubview(peersLabel)
@@ -259,10 +268,15 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
         } catch { alert(error) }
     }
-    func traceTest(_ value: String) { if testPasteboardName != nil { try? FileHandle.standardError.write(contentsOf: Data(("TEST " + value + "\n").utf8)) } }
+    func traceTest(_ value: String) {
+        if testPasteboardName != nil { try? FileHandle.standardError.write(contentsOf: Data(("TEST " + value + "\n").utf8)) }
+        // Only operation names, sizes and connection counts; never clipboard contents or keys.
+        try? diagnosticLog?.write(contentsOf: Data(("\(Date().timeIntervalSince1970) " + value + "\n").utf8))
+    }
     func send(_ object: [String: Any]) {
         traceTest("send " + (object["op"] as? String ?? "unknown"))
         guard let input = input, let data = try? JSONSerialization.data(withJSONObject: object) else { return }
+        traceTest("command bytes \(data.count)")
         do { try input.write(contentsOf: data + Data([10])) } catch { status.stringValue = "Sync engine disconnected" }
     }
     func receive(_ object: [String: Any]) {
@@ -272,7 +286,13 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate {
             guard !config.paused, let event = object["event"] as? [String: Any], let text = event["text"] as? String else { return }
             pendingRemote = (event["mime"] as? String ?? "text/plain", text); applyRemote()
         case "status":
+            traceTest("connection connected=\(object["connected"] as? Bool ?? false) peers=\(object["peers"] as? Int ?? -1)")
+            for peer in object["peer_details"] as? [[String: Any]] ?? [] {
+                traceTest("peer platform=\(peer["platform"] as? String ?? "unknown") route=\(peer["route"] as? String ?? "unknown")")
+            }
             latestConnection = object; renderConnection(); if let group = try? sharingGroup() { inviteDisplay.string = group.invitation }
+        case "diagnostic":
+            traceTest("transport stage=\(object["stage"] as? String ?? "unknown") code=\(object["code"] as? String ?? "unknown")")
         case "error": status.stringValue = object["message"] as? String ?? "Sync error"
         default: break
         }
@@ -284,6 +304,39 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate {
               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
               let w = properties[kCGImagePropertyPixelWidth] as? Int, let h = properties[kCGImagePropertyPixelHeight] as? Int else { return false }
         return w > 0 && h > 0 && w <= 16384 && h <= 16384 && Int64(w) * Int64(h) <= 40_000_000
+    }
+    // Apps may offer JPEG/HEIC/GIF directly, or promise data that is not ready
+    // on the first read. Never fall through to an image's accompanying URL text.
+    static func clipboardImage(_ board: NSPasteboard) -> (advertised: Bool, data: Data?) {
+        let types = (board.types ?? []).filter { UTType($0.rawValue)?.conforms(to: .image) == true }
+        let ordered = [NSPasteboard.PasteboardType.png, .tiff] + types.filter { $0 != .png && $0 != .tiff }
+        for type in ordered where types.contains(type) {
+            // A 12 MP, 16-bit RGBA TIFF alone is about 96 MB. Bound decoded
+            // pixels separately from the much smaller network PNG budget.
+            guard let data = board.data(forType: type), data.count <= 384 * 1024 * 1024 else { continue }
+            if type == .png, png(data) { return (true, data) }
+            guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+                  let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+                  let w = props[kCGImagePropertyPixelWidth] as? Int, let h = props[kCGImagePropertyPixelHeight] as? Int,
+                  w > 0, h > 0, w <= 16384, h <= 16384, Int64(w) * Int64(h) <= 40_000_000 else { continue }
+            var edge = max(w, h)
+            for _ in 0..<10 {
+                let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true,
+                    kCGImageSourceCreateThumbnailWithTransform: true, kCGImageSourceThumbnailMaxPixelSize: edge,
+                    kCGImageSourceShouldCacheImmediately: true]
+                guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary),
+                      let context = CGContext(data: nil, width: image.width, height: image.height,
+                        bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { break }
+                context.interpolationQuality = .high
+                context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+                guard let raster = context.makeImage(),
+                      let converted = NSBitmapImageRep(cgImage: raster).representation(using: .png, properties: [:]) else { break }
+                if png(converted) { return (true, converted) }
+                edge = max(1, Int(Double(edge) * min(0.8, sqrt(Double(maxPNG) / Double(converted.count)) * 0.9)))
+            }
+        }
+        return (!types.isEmpty, nil)
     }
     func applyRemote() {
         guard let pending = pendingRemote else { return }
@@ -301,23 +354,32 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate {
         guard !config.paused, !config.groups.isEmpty, child?.isRunning == true else { lastChange = pasteboard.changeCount; return }
         if pendingRemote != nil { applyRemote(); return }
         let board = pasteboard
-        guard board.changeCount != lastChange else { return }; lastChange = board.changeCount
+        let revision = board.changeCount
+        guard revision != lastChange else { return }
+        // clearContents increments the revision, but a later setData can fill
+        // that SAME revision. A large TIFF may take seconds to be prepared.
+        guard let types = board.types, !types.isEmpty else { return }
         traceTest("local revision")
         let blocked = ["org.nspasteboard.ConcealedType", "org.nspasteboard.TransientType", "org.nspasteboard.AutoGeneratedType"]
-        guard !blocked.contains(where: { board.types?.contains(NSPasteboard.PasteboardType($0)) == true }) else { return }
+        guard !blocked.contains(where: { board.types?.contains(NSPasteboard.PasteboardType($0)) == true }) else { lastChange = revision; return }
         // Prefer image data when applications publish both an image and a text description.
-        if let png = board.data(forType: .png) {
-            if Self.png(png) { send(["op": "copy_image", "data": png.base64EncodedString()]) }
-            else { status.stringValue = "Image exceeds 8 MiB or 40 million pixels" }
+        let image = Self.clipboardImage(board)
+        traceTest("image advertised=\(image.advertised) bytes=\(image.data?.count ?? 0) revision=\(revision) current=\(board.changeCount)")
+        guard board.changeCount == revision else { return }
+        if image.advertised {
+            if let data = image.data {
+                lastChange = revision
+                send(["op": "copy_image", "data": data.base64EncodedString()])
+            } else {
+                if imageRetryRevision != revision { imageRetryRevision = revision; imageRetryUntil = Date().addingTimeInterval(3) }
+                if Date() >= imageRetryUntil {
+                    lastChange = revision
+                    status.stringValue = "이미지를 읽을 수 없거나 전송 한도(8 MiB · 4천만 픽셀)를 초과했습니다"
+                }
+            }
             return
         }
-        if let tiff = board.data(forType: .tiff), let source = CGImageSourceCreateWithData(tiff as CFData, nil),
-           let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
-           let w = props[kCGImagePropertyPixelWidth] as? Int, let h = props[kCGImagePropertyPixelHeight] as? Int,
-           w > 0, h > 0, w <= 16384, h <= 16384, Int64(w) * Int64(h) <= 40_000_000,
-           let rep = NSBitmapImageRep(data: tiff), let png = rep.representation(using: .png, properties: [:]), Self.png(png) {
-            send(["op": "copy_image", "data": png.base64EncodedString()]); return
-        }
+        lastChange = revision
         guard let text = board.string(forType: .string), text.utf8.count <= 1_048_576,
               !text.contains("clipmesh://join#") else { return }
         send(["op": "copy", "text": text])

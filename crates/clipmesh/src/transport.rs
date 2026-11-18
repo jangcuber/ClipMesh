@@ -513,18 +513,35 @@ fn spawn_peer(
     tokio::spawn(async move {
         let id = conn.remote_id().to_string();
         let stable_id = conn.stable_id();
-        let _: Result<()> = async { loop { tokio::select! {
-            changed=outgoing.changed()=>{if changed.is_err(){break;}let Some(frame)=outgoing.borrow_and_update().clone() else{continue;};
-                let mut send = conn.open_uni().await?;
-                tokio::time::timeout(Duration::from_secs(20),send.write_all(frame.as_bytes())).await??; send.finish()?;
-            },
-            frame=control.recv()=>{let Some(frame)=frame else{break;};let mut send=conn.open_uni().await?;
-                tokio::time::timeout(Duration::from_secs(20),send.write_all(frame.as_bytes())).await??;send.finish()?;
-            },
-            stream=conn.accept_uni()=>{let mut stream=stream?;let bytes=tokio::time::timeout(Duration::from_secs(20),stream.read_to_end(MAX_FRAME)).await??;
+        // QUIC flow control requires the remote application to consume data.
+        // Do not stop accepting streams while write_all waits for that credit:
+        // two peers replaying large clipboard images would deadlock each other.
+        let receive = async {
+            loop {
+                let mut stream = conn.accept_uni().await?;
+                let bytes =
+                    tokio::time::timeout(Duration::from_secs(20), stream.read_to_end(MAX_FRAME))
+                        .await??;
                 tx.send(Internal::Data(String::from_utf8(bytes)?)).await?;
             }
-        }} Ok(()) }.await;
+            #[allow(unreachable_code)]
+            Ok::<(), anyhow::Error>(())
+        };
+        let send = async {
+            loop {
+                tokio::select! {
+                    changed=outgoing.changed()=>{if changed.is_err(){break;}let Some(frame)=outgoing.borrow_and_update().clone() else{continue;};
+                        let mut send = conn.open_uni().await?;
+                        tokio::time::timeout(Duration::from_secs(20),send.write_all(frame.as_bytes())).await??; send.finish()?;
+                    },
+                    frame=control.recv()=>{let Some(frame)=frame else{break;};let mut send=conn.open_uni().await?;
+                        tokio::time::timeout(Duration::from_secs(20),send.write_all(frame.as_bytes())).await??;send.finish()?;
+                    },
+                }
+            }
+            Ok::<(), anyhow::Error>(())
+        };
+        let _: Result<()> = tokio::select! { result = receive => result, result = send => result };
         conn.close(0u8.into(), b"transport closed");
         let _ = tx.send(Internal::PeerDown(id, stable_id)).await;
     })

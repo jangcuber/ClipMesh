@@ -40,6 +40,8 @@ jobs:
       - run: bash platforms/ios/test-transport.sh
       - run: bash platforms/ios/test-fallback.sh
       - run: bash platforms/ios/test-dashboard.sh
+      - run: python3 scripts/test-macos-images.py
+      - run: python3 scripts/test-p2p-large-images.py
       - uses: actions/upload-artifact@v4
         with:
           name: ClipMesh-macOS

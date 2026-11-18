@@ -1,5 +1,5 @@
 #define AppName "ClipMesh"
-#define AppVersion "0.3.0"
+#define AppVersion "0.3.2"
 [Setup]
 AppId={{4BDB9E47-45A6-41BC-9B2C-A3928738448D}
 AppName={#AppName}
