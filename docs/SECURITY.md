@@ -6,7 +6,7 @@ ClipMesh encrypts clipboard events with a shared random 32-byte group key and AE
 
 An invitation or QR contains the group key. Anyone who obtains it can read and inject that group's clipboard data. Share it privately, and do not include it in screenshots, issues or logs. To remove a compromised member, create a new group and re-pair the remaining devices. There is no per-device key revocation or application-level forward secrecy.
 
-One active group is a shared latest-value register. Joining or reconnecting may replace the local clipboard with the winning remote value. Password-manager clipboard concealment flags are respected by the Mac client, but users should not assume every platform/app marks sensitive clips. Disable synchronization before copying data you do not want shared with group members.
+One active group is a shared latest-value register. Joining or reconnecting may replace the local clipboard with the winning remote value. Password-manager clipboard concealment flags are respected on every platform: nspasteboard.org concealed/transient/auto-generated types on Mac and iPhone, `ExcludeClipboardContentFromMonitorProcessing` and zero-valued `CanUploadToCloudClipboard`/`CanIncludeInClipboardHistory` on Windows, and `EXTRA_IS_SENSITIVE` on Android 13+. Users should not assume every platform/app marks sensitive clips. Disable synchronization before copying data you do not want shared with group members.
 
 ## Discovery and relay privacy
 

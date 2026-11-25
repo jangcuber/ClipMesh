@@ -165,7 +165,11 @@ pub async fn run(config_path: PathBuf) -> Result<()> {
                         if config.paused {continue;}
                         let decoded=(||->Result<(Envelope,crate::Event)>{let env:Envelope=serde_json::from_str(text.as_ref())?;let event=env.open(&group)?;Ok((env,event))})();
                         match decoded {
-                            Ok((env,event))=>if state.receive(event.clone())?{latest=Some(env);persist(&state,&history_path,&group)?;emit(json!({"type":"clipboard","event":event})).await?;},
+                            Ok((env,event))=>match state.receive(event.clone()) {
+                                Ok(true)=>{latest=Some(env);persist(&state,&history_path,&group)?;emit(json!({"type":"clipboard","event":event})).await?;},
+                                Ok(false)=>{},
+                                Err(_)=>emit(json!({"type":"error","message":"Rejected clipboard event with an invalid clock"})).await?,
+                            },
                             Err(_)=>emit(json!({"type":"error","message":"Rejected invalid encrypted event"})).await?
                         }
                     },
@@ -252,8 +256,15 @@ async fn run_mesh(config_path: PathBuf, mut config: Config, group: crate::Group)
                 Some(Notice::Diagnostic{stage,code})=>emit(json!({"type":"diagnostic","stage":stage,"code":code})).await?,
             Some(Notice::Frame(frame))=>{
                     if config.paused {continue;}
-                    let env:Envelope=serde_json::from_str(&frame)?;let event=env.open(&group)?;
-                    if state.receive(event.clone())? {latest=Some(env);persist(&state,&history_path,&group)?;emit(json!({"type":"clipboard","event":event})).await?;}
+                    // A peer's frame must never terminate the engine: a restart would
+                    // receive the same retained frame again and loop forever.
+                    let decoded=(||->Result<(Envelope,crate::Event)>{let env:Envelope=serde_json::from_str(&frame)?;let event=env.open(&group)?;Ok((env,event))})();
+                    let accepted=decoded.and_then(|(env,event)|state.receive(event.clone()).map(|newer|(env,event,newer)));
+                    match accepted {
+                        Ok((env,event,true))=>{latest=Some(env);persist(&state,&history_path,&group)?;emit(json!({"type":"clipboard","event":event})).await?;},
+                        Ok((_,_,false))=>{},
+                        Err(_)=>emit(json!({"type":"error","message":"Rejected invalid encrypted event"})).await?,
+                    }
                 },None=>anyhow::bail!("P2P transport exited"),
             }
         }

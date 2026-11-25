@@ -140,8 +140,10 @@ final class ClipboardEngine: NSObject {
         guard mime != "text/plain" || !text.contains("clipmesh://join#") else { diagnostics["pairing_filtered", default: 0] += 1; return }
         var state = metadata.groups[group.id] ?? GroupState()
         guard state.clock < maxClock - 1 else { publish("Clock exhausted; create a new group"); return }
-        state.clock += 1
-        let event = ClipEvent(id: UUID().uuidString.lowercased(), device: config.device, clock: state.clock, created_ms: UInt64(Date().timeIntervalSince1970 * 1000), mime: mime, text: text)
+        let now = nowMs()
+        // Hybrid logical clock: an offline copy beats older remote copies.
+        state.clock = max(state.clock + 1, now)
+        let event = ClipEvent(id: UUID().uuidString.lowercased(), device: config.device, clock: state.clock, created_ms: now, mime: mime, text: text)
         do {
             _ = try state.observe(event, group: group)
             metadata.groups[group.id] = state

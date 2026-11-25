@@ -22,6 +22,15 @@ pub const MAX_IMAGE: usize = 8 * 1024 * 1024;
 pub const MAX_FRAME: usize = 24 * 1024 * 1024;
 pub const MAX_CLOCK: u64 = (1u64 << 53) - 1;
 pub const HISTORY_LIMIT: usize = 100;
+/// Hybrid logical clocks track Unix milliseconds. Events further ahead than this
+/// are rejected so one member cannot push the group clock to `MAX_CLOCK`.
+pub const MAX_CLOCK_FUTURE_MS: u64 = 24 * 60 * 60 * 1000;
+pub fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
 const MAX_HISTORY_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -367,7 +376,14 @@ pub struct Register {
 impl Register {
     /// Receiving a valid old event advances logical time, but does not replace a newer clipboard.
     pub fn receive(&mut self, event: Event) -> Result<bool> {
+        self.receive_at(event, now_ms())
+    }
+    pub fn receive_at(&mut self, event: Event, now_ms: u64) -> Result<bool> {
         event.validate()?;
+        ensure!(
+            event.clock <= now_ms.saturating_add(MAX_CLOCK_FUTURE_MS),
+            "event clock is too far in the future"
+        );
         if self.history.iter().any(|e| e.id == event.id)
             || self.winner.as_ref().is_some_and(|e| e.id == event.id)
         {
@@ -408,18 +424,19 @@ impl Register {
             !text.contains("clipmesh://join#"),
             "Pairing invitations are excluded from clipboard sync"
         );
+        let now = now_ms();
+        // Hybrid logical clock: never behind wall time, so a copy made while
+        // offline beats older copies made elsewhere, yet always after what we saw.
         let e = Event {
             v: 1,
             id: Uuid::new_v4().to_string(),
             device: device.into(),
-            clock: self.clock.checked_add(1).context("clock exhausted")?,
-            created_ms: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)?
-                .as_millis() as u64,
+            clock: self.clock.checked_add(1).context("clock exhausted")?.max(now),
+            created_ms: now,
             mime: mime.into(),
             text,
         };
-        self.receive(e.clone())?;
+        self.receive_at(e.clone(), now)?;
         Ok(e)
     }
     pub fn load(path: &Path, group: &Group) -> Result<Self> {

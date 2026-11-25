@@ -15,6 +15,8 @@ const val MAX_TEXT_BYTES = 1_048_576
 const val MAX_IMAGE_BYTES = 8 * 1_048_576
 const val MAX_FRAME_BYTES = 24 * 1_048_576 + 4096
 const val MAX_CLOCK = 9_007_199_254_740_991L
+/** Hybrid logical clocks track Unix ms; reject events further ahead (matches the Rust core). */
+const val MAX_CLOCK_FUTURE_MS = 24L * 60 * 60 * 1000
 
 data class Group(val name: String, val relay: String, val key: ByteArray, val transport:String = "relay",val seeds:List<String> = emptyList()) {
     val id: String get() = MessageDigest.getInstance("SHA-256").digest(key).joinToString("") { "%02x".format(it) }

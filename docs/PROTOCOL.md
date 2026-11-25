@@ -26,11 +26,11 @@ Decrypted clipboard event:
 {"v":1,"id":"lowercase UUID","device":"lowercase UUID","clock":1,"created_ms":1790000000000,"mime":"text/plain","text":"Hello 안녕하세요"}
 ```
 
-Text bound: 1 MiB **UTF-8 bytes**, including empty text. JSON escaping can expand the wire frame, so transport bounds are larger. Logical clocks must remain below `2^53-1`; event wall-clock timestamps are informational and never choose a winner. UUIDs emitted by clients are lowercase.
+Text bound: 1 MiB **UTF-8 bytes**, including empty text. JSON escaping can expand the wire frame, so transport bounds are larger. Logical clocks must remain below `2^53-1`. Clocks are hybrid logical clocks: a local copy uses `max(clock + 1, now_ms)`, so a copy made while offline orders after older copies made elsewhere. Receivers reject events whose clock is more than 24 hours ahead of their own wall clock, so a single member cannot exhaust the clock; `created_ms` stays informational. UUIDs emitted by clients are lowercase.
 
 ## Conflict and loop handling
 
-Each group has its own logical clock and winning register. Valid events are ordered by `(clock, device, id)` ascending; the greatest tuple wins. Device and event UUID comparison is ordinal ASCII. On receipt, advance Lamport time using the received clock; duplicates do not need another clipboard write. Local copies generate fresh UUIDs and advance the clock. This converges under simultaneous copy independent of delivery order. The timestamp on a device with a skewed clock cannot dominate the group.
+Each group has its own logical clock and winning register. Valid events are ordered by `(clock, device, id)` ascending; the greatest tuple wins. Device and event UUID comparison is ordinal ASCII. On receipt, advance Lamport time using the received clock; duplicates do not need another clipboard write. Local copies generate fresh UUIDs and advance the clock. This converges under simultaneous copy independent of delivery order. A device whose clock runs fast (within the 24-hour bound) cannot dominate later copies, because receivers advance past its clock; a device more than 24 hours ahead has its events rejected until its clock is corrected.
 
 Native hosts suppress the notification caused by writing a remote value, and the core suppresses repeated event IDs. On startup clients do not publish the pre-existing local clipboard. They can receive the group's latest retained event, so joining can change the local clipboard. On reconnect a client republishes its group winner; clients converge through the same total order. Disconnected copies collapse into the latest register rather than growing an unbounded queue. No promise of delivering every intermediate copy while a device is offline.
 

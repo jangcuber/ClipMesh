@@ -230,6 +230,7 @@ class MeshForm : Form {
         if (m.Msg != ClipboardUpdate || config.paused || core is not { HasExited: false } || pendingRemote != null) return;
         if (GetClipboardSequenceNumber() == lastRemoteSequence) return;
         try {
+            if (IsSensitiveClipboard()) { Trace("sensitive clipboard skipped"); return; }
             if (Clipboard.ContainsData("PNG")) {
                 var value = Clipboard.GetData("PNG"); byte[]? data = value as byte[];
                 if (value is Stream png) {
@@ -254,6 +255,18 @@ class MeshForm : Form {
             if (!text.Contains("clipmesh://join#", StringComparison.Ordinal) && Encoding.UTF8.GetByteCount(text) <= 1048576) Send(new { op = "copy", text });
         } catch (ExternalException) { }
         catch (Exception) { status.Text = "Clipboard image could not be read"; }
+    }
+    // Password managers (KeePass, Bitwarden, 1Password…) mark secrets with these
+    // formats so clipboard history and cloud sync skip them. Honour them here too.
+    static bool IsSensitiveClipboard() {
+        if (Clipboard.ContainsData("ExcludeClipboardContentFromMonitorProcessing") || Clipboard.ContainsData("Clipboard Viewer Ignore")) return true;
+        foreach (var format in new[] { "CanUploadToCloudClipboard", "CanIncludeInClipboardHistory" }) {
+            if (!Clipboard.ContainsData(format)) continue;
+            byte[]? flag = Clipboard.GetData(format) switch { byte[] b => b, MemoryStream m => m.ToArray(), Stream st => ReadSmall(st), _ => null };
+            if (flag is { Length: >= 4 } && BitConverter.ToUInt32(flag, 0) == 0) return true;
+        }
+        return false;
+        static byte[] ReadSmall(Stream st) { var buffer = new byte[16]; int n = st.Read(buffer, 0, buffer.Length); return buffer[..n]; }
     }
     Group? SharingGroup(bool requireReady) {
         var group = config.groups.FirstOrDefault(g => g.Id == config.active_group);

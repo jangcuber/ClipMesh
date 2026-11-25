@@ -185,3 +185,33 @@ fn relay_free_seed_invitations_are_bounded_and_legacy_vectors_stay_identical() {
     group.seeds = vec![iroh::SecretKey::generate().public().to_string(); 33];
     assert!(group.validate().is_err());
 }
+#[test]
+fn far_future_clocks_are_rejected_without_poisoning_the_register() {
+    let v = vector();
+    let now = 1_800_000_000_000u64;
+    let mut state = Register::default();
+    let mut poison = v.event.clone();
+    poison.clock = clipmesh::MAX_CLOCK - 1;
+    assert!(state.receive_at(poison, now).is_err());
+    assert_eq!(state.clock, 0);
+    assert!(state.winner.is_none());
+    let mut near = v.event.clone();
+    near.clock = now + clipmesh::MAX_CLOCK_FUTURE_MS;
+    assert!(state.receive_at(near, now).unwrap());
+    let mut far = v.event;
+    far.id = "00000000-0000-4000-8000-000000000009".into();
+    far.clock = now + clipmesh::MAX_CLOCK_FUTURE_MS + 1;
+    assert!(state.receive_at(far, now).is_err());
+}
+#[test]
+fn copy_made_offline_beats_older_remote_copies() {
+    let v = vector();
+    let mut offline = Register::default();
+    let mut remote = v.event;
+    // Another device copied an hour ago while this one was offline at Lamport time 0.
+    remote.clock = clipmesh::now_ms() - 60 * 60 * 1000;
+    let mine = offline.copy("00000000-0000-4000-8000-0000000000aa", "fresh".into()).unwrap();
+    assert!(mine.clock > remote.clock);
+    assert!(!offline.receive(remote).unwrap());
+    assert_eq!(offline.winner.unwrap().text, "fresh");
+}

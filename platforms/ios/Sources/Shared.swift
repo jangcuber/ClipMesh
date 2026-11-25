@@ -5,6 +5,9 @@ let configurationURL = URL(fileURLWithPath: "/var/mobile/Library/Preferences/dev
 let statusURL = URL(fileURLWithPath: "/var/mobile/Library/Preferences/dev.clipmesh.ios.status.json")
 let stateURL = URL(fileURLWithPath: "/var/mobile/Library/Preferences/dev.clipmesh.ios.state.json")
 let maxClock: UInt64 = 9_007_199_254_740_991
+/// Hybrid logical clocks track Unix ms; reject events further ahead (matches the Rust core).
+let maxClockFutureMs: UInt64 = 24 * 60 * 60 * 1000
+func nowMs() -> UInt64 { UInt64(max(0, Date().timeIntervalSince1970 * 1000)) }
 let maxTextBytes = 1_048_576
 let maxImageBytes = 8 * 1024 * 1024
 let maxFrameBytes = 24 * 1024 * 1024
@@ -147,8 +150,9 @@ struct GroupState: Codable {
     var latest: EventOrder?
     var winner: Envelope?
 
-    mutating func observe(_ event: ClipEvent, group: Group) throws -> Bool {
+    mutating func observe(_ event: ClipEvent, group: Group, now: UInt64 = nowMs()) throws -> Bool {
         try event.validate()
+        guard event.clock <= now + maxClockFutureMs else { throw ClipError.invalid("Event clock too far in the future") }
         let wins = latest == nil || event.order > latest!
         if wins || (event.order == latest && winner == nil) {
             // Also upgrades metadata-only state when its exact winner is replayed.

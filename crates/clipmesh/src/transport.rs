@@ -787,6 +787,10 @@ async fn handshake(
 fn update_latest(group: &Group, latest: &mut Option<String>, frame: &str) -> Result<()> {
     let e: Envelope = serde_json::from_str(frame)?;
     let event = e.open(group)?;
+    // Same bound as Register: a far-future frame must not pin the replayed winner.
+    if event.clock > crate::now_ms().saturating_add(crate::MAX_CLOCK_FUTURE_MS) {
+        return Ok(());
+    }
     let order = latest
         .as_ref()
         .and_then(|s| serde_json::from_str::<Envelope>(s).ok())

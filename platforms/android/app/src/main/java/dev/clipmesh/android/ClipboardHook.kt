@@ -37,6 +37,9 @@ class ClipboardHook: IXposedHookLoadPackage {
                         // Android 15 supports virtual-device clipboards. This app syncs the
                         // physical device's clipboard only, rather than crossing profiles/devices.
                         if(types.size > 2 && types[2] == Int::class.javaPrimitiveType && (hook.args[2] as? Int) != 0) return
+                        // ClipDescription.EXTRA_IS_SENSITIVE (API 33): password managers mark
+                        // secrets this way. Never forward them to other devices.
+                        if(clip.description.extras?.getBoolean("android.content.extra.IS_SENSITIVE",false)==true) return
                         val observed=android.os.SystemClock.elapsedRealtimeNanos()
                         val item = clip.getItemAt(0)
                         val uri = item.uri?.takeIf { it.scheme=="content" }

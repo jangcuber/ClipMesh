@@ -104,7 +104,10 @@ class SyncEngine(private val store: ConfigStore, private val group: Group, priva
             val hash = payloadHash(mime,text)
             if(hash == lastHash) return@submit
             check(clock < MAX_CLOCK - 1)
-            val event = ClipEvent(UUID.randomUUID().toString(),device,++clock,System.currentTimeMillis(),text,mime)
+            val now = System.currentTimeMillis()
+            // Hybrid logical clock: an offline copy beats older remote copies.
+            clock = maxOf(clock + 1, now)
+            val event = ClipEvent(UUID.randomUUID().toString(),device,clock,now,text,mime)
             store.saveState(group,clock,event)
             winner = event; lastHash = hash
             if (connected) sendFrame(Wire.seal(group,event))
@@ -115,6 +118,7 @@ class SyncEngine(private val store: ConfigStore, private val group: Group, priva
         if (store.paused) return
         try {
             val event = Wire.open(group,frame)
+            require(event.clock <= System.currentTimeMillis() + MAX_CLOCK_FUTURE_MS) { "Event clock too far in the future" }
             clock = maxOf(clock,event.clock)
             val current = winner
             if (current != null && event <= current) { store.saveState(group,clock,current); return }
